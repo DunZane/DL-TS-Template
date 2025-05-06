@@ -1,6 +1,7 @@
 import os
 
 import numpy as np
+import swanlab
 import torch
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -58,7 +59,7 @@ class EarlyStopping:
     def save_checkpoint(self, val_loss, model, path):
         if self.verbose:
             print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
-        torch.save(model.state_dict(), path + '/' + 'checkpoint.pth')
+        torch.save(model.state_dict(), path / 'checkpoint.pth')
         self.val_loss_min = val_loss
 
 
@@ -90,4 +91,6 @@ def visual(true, preds=None, name='./pic/test.pdf'):
         plt.plot(preds, label='Prediction', linewidth=2)
     plt.plot(true, label='GroundTruth', linewidth=2)
     plt.legend()
+
+    swanlab.log({name: swanlab.Image(plt)})
     plt.savefig(name, bbox_inches='tight')

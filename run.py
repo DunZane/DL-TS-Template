@@ -3,7 +3,7 @@ import os
 import torch
 import random
 import numpy as np
-
+import swanlab
 from exp.exp_main import Exp_Long_Term_Forecast
 
 
@@ -36,12 +36,13 @@ def main():
                              'b:business days, w:weekly, m:monthly], you can also use more detailed freq like 15min '
                              'or 3h')
     parser.add_argument('--checkpoints', type=str, default='./checkpoints/', help='location of model checkpoints')
-    parser.add_argument('--inverse', action='store_true', help='inverse output data', default=False)
 
     # forecasting task
     parser.add_argument('--seq_len', type=int, default=96, help='input sequence length')
     parser.add_argument('--label_len', type=int, default=48, help='start token length')
     parser.add_argument('--pred_len', type=int, default=96, help='prediction sequence length')
+    parser.add_argument('--seasonal_patterns', type=str, default='Monthly', help='subset for M4')
+    parser.add_argument('--inverse', action='store_true', help='inverse output data', default=False)
 
     # model define
     parser.add_argument('--expand', type=int, default=2, help='expansion factor for Mamba')
@@ -101,6 +102,10 @@ def main():
                         help='hidden layer dimensions of projector (List)')
     parser.add_argument('--p_hidden_layers', type=int, default=2, help='number of hidden layers in projector')
 
+    # metrics (dtw)
+    parser.add_argument('--use_dtw', type=bool, default=False,
+                        help='the controller of using dtw metric (dtw is time consuming, not suggested unless necessary)')
+
     # Augmentation
     parser.add_argument('--augmentation_ratio', type=int, default=0, help="How many times to augment")
     parser.add_argument('--seed', type=int, default=2, help="Randomization seed")
@@ -129,6 +134,18 @@ def main():
     parser.add_argument('--patch_len', type=int, default=16, help='patch length')
 
     args = parser.parse_args()
+
+    # SwanLab
+    swanlab.init(
+        project="deep_time_series_long_term_forecast",
+        experiment_name=args.model_id,
+        config={
+            **vars(args),
+            "seed": fix_seed,
+            "device": str(args.device),
+        }
+    )
+
     if torch.cuda.is_available() and args.use_gpu:
         args.device = torch.device('cuda:{}'.format(args.gpu))
         print('Using GPU')

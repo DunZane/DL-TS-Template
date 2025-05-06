@@ -6,6 +6,7 @@ import time
 import warnings
 import numpy as np
 from pathlib import Path
+import swanlab
 
 from data_provider.data_factory import data_provider
 from exp.exp_basic import Exp_Basic
@@ -79,10 +80,12 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         vali_data, vali_loader = self._get_data(flag='val')
         test_data, test_loader = self._get_data(flag='test')
 
-        path = Path(self.args.checkpoint) / str(setting)
+        path = Path(self.args.checkpoints) / str(setting)
         path.mkdir(parents=True, exist_ok=True)
 
         time_now = time.time()
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
 
         train_steps = len(train_loader)
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
@@ -143,8 +146,22 @@ class Exp_Long_Term_Forecast(Exp_Basic):
             vali_loss = self.vali(vali_data, vali_loader, criterion)
             test_loss = self.vali(test_data, test_loader, criterion)
 
-            print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
-                epoch + 1, train_steps, train_loss, vali_loss, test_loss))
+            peak_memory_mb = 0
+            if torch.cuda.is_available():
+                peak_memory_mb = torch.cuda.max_memory_allocated() / 1024 ** 2  # Convert to MB
+
+            print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} "
+                  "Test Loss: {4:.7f} Peak Memory: {5:.2f} MB".format(epoch + 1, train_steps, train_loss,
+                                                                      vali_loss, test_loss, peak_memory_mb))
+
+            swanlab.log({
+                "epoch": epoch + 1,
+                "train_loss": train_loss,
+                "vali_loss": vali_loss,
+                "test_loss": test_loss,
+                "peak_memory_mb": peak_memory_mb
+            })
+
             early_stopping(vali_loss, self.model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
@@ -250,6 +267,17 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
         mae, mse, rmse, mape, mspe = metric(preds, trues)
         print('mse:{}, mae:{}, dtw:{}'.format(mse, mae, dtw))
+
+
+        swanlab.log({
+            "test_mse": mse,
+            "test_mae": mae,
+            "test_rmse": rmse,
+            "test_mape": mape,
+            "test_mspe": mspe,
+            "test_dtw": dtw if isinstance(dtw, (int, float)) else 0
+        })
+
         f = open("result_long_term_forecast.txt", 'a')
         f.write(setting + "  \n")
         f.write('mse:{}, mae:{}, dtw:{}'.format(mse, mae, dtw))
