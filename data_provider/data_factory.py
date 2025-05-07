@@ -1,8 +1,9 @@
-from data_provider.data_loader import Dataset_ETT_hour
+from data_provider.data_loader import Dataset_ETT_hour, Dataset_Kuai_Easy_QPS
 from torch.utils.data import DataLoader
 
 data_dict = {
     'ETTh1': Dataset_ETT_hour,
+    'KuaiEasyQPS': Dataset_Kuai_Easy_QPS
 }
 
 

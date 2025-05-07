@@ -6,19 +6,20 @@ python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
   --root_path ./dataset/Kuai/ \
-  --data_path ETTh1.csv \
-  --model_id ETTh1_96_24 \
+  --data_path easy_train_data.csv \
+  --model_id Easy_QPS_1440_60 \
   --model $model_name \
-  --data ETTh1 \
-  --features M \
-  --seq_len 96 \
+  --data KuaiEasyQPS \
+  --features S \
+  --seq_len 1440 \
   --label_len 48 \
-  --pred_len 24 \
+  --pred_len 60 \
   --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
   --enc_in 7 \
   --dec_in 7 \
   --c_out 7 \
+  --freq 'b' \
   --des 'Exp' \
   --itr 1
