@@ -148,7 +148,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
             peak_memory_mb = 0
             if torch.cuda.is_available():
-                peak_memory_mb = torch.cuda.max_memory_allocated() / 1024 ** 2  # Convert to MB
+                peak_memory_mb = torch.cuda.max_memory_allocated() / 1024 ** 2
 
             print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} "
                   "Test Loss: {4:.7f} Peak Memory: {5:.2f} MB".format(epoch + 1, train_steps, train_loss,
@@ -156,9 +156,9 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
             swanlab.log({
                 "epoch": epoch + 1,
-                "train_loss": train_loss,
-                "vali_loss": vali_loss,
-                "test_loss": test_loss,
+                "train/train_loss": train_loss,
+                "vali/vali_loss": vali_loss,
+                "test/test_loss": test_loss,
                 "peak_memory_mb": peak_memory_mb
             })
 
@@ -268,14 +268,13 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         mae, mse, rmse, mape, mspe = metric(preds, trues)
         print('mse:{}, mae:{}, dtw:{}'.format(mse, mae, dtw))
 
-
         swanlab.log({
-            "test_mse": mse,
-            "test_mae": mae,
-            "test_rmse": rmse,
-            "test_mape": mape,
-            "test_mspe": mspe,
-            "test_dtw": dtw if isinstance(dtw, (int, float)) else 0
+            "test/test_mse": mse,
+            "test/test_mae": mae,
+            "test/test_rmse": rmse,
+            "test/test_mape": mape,
+            "test/test_mspe": mspe,
+            "test/test_dtw": dtw if isinstance(dtw, (int, float)) else 0
         })
 
         f = open("result_long_term_forecast.txt", 'a')
