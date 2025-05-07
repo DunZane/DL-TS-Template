@@ -1,4 +1,4 @@
-from data_provider.data_loader import Dataset_ETT_hour, Dataset_Kuai_Easy_QPS
+from data_provider.data_loader import Dataset_ETT_hour, Dataset_Kuai_Easy_QPS, Dataset_Kuai_Easy_QPS_Infer
 from torch.utils.data import DataLoader
 
 data_dict = {
@@ -11,10 +11,22 @@ def data_provider(args, flag):
     Data = data_dict[args.data]
     timeenc = 0 if args.embed != 'timeF' else 1
 
-    shuffle_flag = False if (flag == 'test' or flag == 'TEST') else True
-    drop_last = False
-    batch_size = args.batch_size
-    freq = args.freq
+    if flag == 'test':
+        shuffle_flag = False
+        drop_last = True
+        batch_size = args.batch_size
+        freq = args.freq
+    elif flag == 'infer':
+        shuffle_flag = False
+        drop_last = False
+        batch_size = 1
+        freq = args.freq
+        Data = Dataset_Kuai_Easy_QPS_Infer
+    else:
+        shuffle_flag = True
+        drop_last = True
+        batch_size = args.batch_size
+        freq = args.freq
 
     data_set = Data(
         args=args,

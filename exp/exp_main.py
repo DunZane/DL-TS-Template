@@ -83,83 +83,88 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         path = Path(self.args.checkpoints) / str(setting)
         path.mkdir(parents=True, exist_ok=True)
 
-        time_now = time.time()
         if torch.cuda.is_available():
-            torch.cuda.reset_peak_memory_stats()
-
-        train_steps = len(train_loader)
-        early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
+            torch.cuda.reset_peak_memory_stats(self.device)
 
         model_optim = self._select_optimizer()
         criterion = self._select_criterion()
+        early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
+
+        train_steps = len(train_loader)
+        scaler = torch.cuda.amp.GradScaler() if self.args.use_amp else None
 
         for epoch in range(self.args.train_epochs):
-            iter_count = 0
-            train_loss = []
-
             self.model.train()
-            epoch_time = time.time()
+            train_loss = []
+            iter_count = 0
+            epoch_start = time.time()
+            batch_start_time = time.time()
+
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(train_loader):
                 iter_count += 1
                 model_optim.zero_grad()
+
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float().to(self.device)
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
-                # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                 dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
 
-                # encoder - decoder
+                # forward
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-                else:
-                    outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-
-                f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
-                loss = criterion(outputs, batch_y)
-                train_loss.append(loss.item())
-
-                if (i + 1) % 100 == 0:
-                    print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, loss.item()))
-                    speed = (time.time() - time_now) / iter_count
-                    left_time = speed * ((self.args.train_epochs - epoch) * train_steps - i)
-                    print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
-                    iter_count = 0
-                    time_now = time.time()
-
-                if self.args.use_amp:
-                    scaler = torch.cuda.amp.GradScaler()
+                        f_dim = -1 if self.args.features == 'MS' else 0
+                        outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                        target = batch_y[:, -self.args.pred_len:, f_dim:]
+                        loss = criterion(outputs, target)
                     scaler.scale(loss).backward()
                     scaler.step(model_optim)
                     scaler.update()
                 else:
+                    outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                    f_dim = -1 if self.args.features == 'MS' else 0
+                    outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                    target = batch_y[:, -self.args.pred_len:, f_dim:]
+                    loss = criterion(outputs, target)
                     loss.backward()
                     model_optim.step()
 
-            print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
-            train_loss = np.average(train_loss)
+                train_loss.append(loss.item())
+
+                # Logging
+                if (i + 1) % 100 == 0:
+                    avg_batch_time = (time.time() - batch_start_time) / iter_count
+                    remaining_iters = (self.args.train_epochs - epoch - 1) * train_steps + (train_steps - i)
+                    eta = avg_batch_time * remaining_iters
+                    print(f"\titers: {i + 1}, epoch: {epoch + 1} | loss: {loss.item():.7f}")
+                    print(f"\tspeed: {avg_batch_time:.4f}s/iter; left time: {eta:.2f}s")
+                    iter_count = 0
+                    batch_start_time = time.time()
+
+            epoch_duration = time.time() - epoch_start
+            train_loss_avg = np.mean(train_loss)
             vali_loss = self.vali(vali_data, vali_loader, criterion)
             test_loss = self.vali(test_data, test_loader, criterion)
 
-            peak_memory_mb = 0
-            if torch.cuda.is_available():
-                peak_memory_mb = torch.cuda.max_memory_allocated() / 1024 ** 2
+            peak_memory = (
+                torch.cuda.max_memory_allocated(self.device) / 1024 ** 2
+                if torch.cuda.is_available() else 0.0
+            )
 
-            print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} "
-                  "Test Loss: {4:.7f} Peak Memory: {5:.2f} MB".format(epoch + 1, train_steps, train_loss,
-                                                                      vali_loss, test_loss, peak_memory_mb))
+            print(f"Epoch: {epoch + 1}, Time: {epoch_duration:.2f}s | "
+                  f"Train Loss: {train_loss_avg:.7f}, Vali Loss: {vali_loss:.7f}, "
+                  f"Test Loss: {test_loss:.7f}, Peak Memory: {peak_memory:.2f} MB")
 
             swanlab.log({
                 "epoch": epoch + 1,
-                "train/train_loss": train_loss,
-                "vali/vali_loss": vali_loss,
-                "test/test_loss": test_loss,
-                "peak_memory_mb": peak_memory_mb
+                "train/train_loss": train_loss_avg,
+                "train/vali_loss": vali_loss,
+                "train/test_loss": test_loss,
+                "train/epoch_time": epoch_duration,
+                "train/peak_memory_MB": peak_memory
             })
 
             early_stopping(vali_loss, self.model, path)
@@ -169,12 +174,11 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
             adjust_learning_rate(model_optim, epoch + 1, self.args)
 
+        # load best model
         best_model_path = path / 'checkpoint.pth'
         if not best_model_path.exists():
             raise FileNotFoundError(f"Model checkpoint not found at: {best_model_path}")
-
-        state_dict = torch.load(str(best_model_path), map_location=self.device)
-        self.model.load_state_dict(state_dict)
+        self.model.load_state_dict(torch.load(best_model_path, map_location=self.device))
 
         return self.model
 
@@ -246,9 +250,8 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         print('test shape:', preds.shape, trues.shape)
 
         # result save
-        folder_path = './results/' + setting + '/'
-        if not os.path.exists(folder_path):
-            os.makedirs(folder_path)
+        folder_path = Path('./results') / setting
+        folder_path.mkdir(parents=True, exist_ok=True)
 
         # dtw calculation
         if self.args.use_dtw:
@@ -269,12 +272,12 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         print('mse:{}, mae:{}, dtw:{}'.format(mse, mae, dtw))
 
         swanlab.log({
-            "test/test_mse": mse,
-            "test/test_mae": mae,
-            "test/test_rmse": rmse,
-            "test/test_mape": mape,
-            "test/test_mspe": mspe,
-            "test/test_dtw": dtw if isinstance(dtw, (int, float)) else 0
+            "test/mse": mse,
+            "test/mae": mae,
+            "test/rmse": rmse,
+            "test/mape": mape,
+            "test/mspe": mspe,
+            "test/dtw": dtw if isinstance(dtw, (int, float)) else 0
         })
 
         f = open("result_long_term_forecast.txt", 'a')
@@ -284,6 +287,136 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         f.write('\n')
         f.close()
 
+        np.save(folder_path + 'metrics.npy', np.array([mae, mse, rmse, mape, mspe]))
+        np.save(folder_path + 'pred.npy', preds)
+        np.save(folder_path + 'true.npy', trues)
+
+    def infer(self, setting):
+        import time
+        total_start = time.time()
+
+        infer_data, infer_loader = self._get_data(flag='infer')
+        if infer_data is None or len(infer_data) < self.args.seq_len:
+            raise ValueError("Inference data is empty or too short for the specified seq_len.")
+
+        print('loading model')
+        checkpoint_path = Path('./checkpoints') / setting / 'checkpoint.pth'
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint file not found at {checkpoint_path}")
+        self.model.load_state_dict(torch.load(checkpoint_path, map_location=self.device))
+
+        # reset peak memory stats before inference
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats(self.device)
+
+        preds = []
+        trues = []
+        infer_times = []
+
+        self.model.eval()
+        with torch.no_grad():
+            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(infer_loader):
+                infer_start = time.time()
+
+                batch_x = batch_x.float().to(self.device)
+                batch_y = batch_y.float().to(self.device)
+                batch_x_mark = batch_x_mark.float().to(self.device)
+                batch_y_mark = batch_y_mark.float().to(self.device)
+
+                # decoder input
+                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+
+                # encoder-decoder forward
+                if self.args.use_amp:
+                    with torch.cuda.amp.autocast():
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                else:
+                    outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+
+                f_dim = -1 if self.args.features == 'MS' else 0
+                outputs = outputs[:, -self.args.pred_len:, :]
+                batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
+
+                outputs = outputs.detach().cpu().numpy()
+                batch_y = batch_y.detach().cpu().numpy()
+
+                if infer_data.scale and self.args.inverse:
+                    shape = batch_y.shape
+                    if outputs.shape[-1] != batch_y.shape[-1]:
+                        outputs = np.tile(outputs, [1, 1, int(batch_y.shape[-1] / outputs.shape[-1])])
+                    outputs = infer_data.inverse_transform(outputs.reshape(shape[0] * shape[1], -1)).reshape(shape)
+                    batch_y = infer_data.inverse_transform(batch_y.reshape(shape[0] * shape[1], -1)).reshape(shape)
+
+                outputs = outputs[:, :, f_dim:]
+                batch_y = batch_y[:, :, f_dim:]
+
+                pred = outputs
+                true = batch_y
+
+                preds.append(pred)
+                trues.append(true)
+
+                infer_end = time.time()
+                infer_times.append(infer_end - infer_start)
+
+        # concatenate results
+        preds = np.concatenate(preds, axis=0)
+        trues = np.concatenate(trues, axis=0)
+        print('test shape:', preds.shape, trues.shape)
+
+        preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
+        trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
+        print('reshaped test shape:', preds.shape, trues.shape)
+
+        # result save
+        folder_path = './results/' + setting + '/'
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+
+        # DTW calculation
+        if self.args.use_dtw:
+            dtw_list = []
+            manhattan_distance = lambda x, y: np.abs(x - y)
+            for i in range(preds.shape[0]):
+                x = preds[i].reshape(-1, 1)
+                y = trues[i].reshape(-1, 1)
+                if i % 100 == 0:
+                    print("calculating dtw iter:", i)
+                d, _, _, _ = accelerated_dtw(x, y, dist=manhattan_distance)
+                dtw_list.append(d)
+            dtw = np.array(dtw_list).mean()
+        else:
+            dtw = 'Not calculated'
+
+        # metrics
+        mae, mse, rmse, mape, mspe = metric(preds, trues)
+        print('mse:{}, mae:{}, dtw:{}'.format(mse, mae, dtw))
+
+        # memory and time stats
+        total_time = time.time() - total_start
+        avg_infer_time = sum(infer_times) / len(infer_times)
+        max_infer_time = max(infer_times)
+        if torch.cuda.is_available():
+            max_memory = torch.cuda.max_memory_allocated(self.device) / (1024 ** 2)  # MB
+        else:
+            max_memory = 0.0
+
+        # SwanLab logging
+        swanlab.log({
+            "infer/mse": mse,
+            "infer/mae": mae,
+            "infer/rmse": rmse,
+            "infer/mape": mape,
+            "infer/mspe": mspe,
+            "infer/dtw": dtw if isinstance(dtw, (int, float)) else 0,
+            "infer/total_time": total_time,
+            "infer/avg_infer_time": avg_infer_time,
+            "infer/max_infer_time": max_infer_time,
+            "infer/max_memory_MB": max_memory,
+        })
+
+        # save to disk
         np.save(folder_path + 'metrics.npy', np.array([mae, mse, rmse, mape, mspe]))
         np.save(folder_path + 'pred.npy', preds)
         np.save(folder_path + 'true.npy', trues)
