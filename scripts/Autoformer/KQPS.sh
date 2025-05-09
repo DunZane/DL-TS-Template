@@ -17,9 +17,9 @@ python -u run.py \
   --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
-  --enc_in 7 \
-  --dec_in 7 \
-  --c_out 7 \
+  --enc_in 1 \
+  --dec_in 1 \
+  --c_out 1 \
   --freq 'b' \
   --des 'Exp' \
   --itr 1
