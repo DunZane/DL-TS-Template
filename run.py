@@ -139,10 +139,11 @@ def main():
     swanlab.init(
         project="deep_time_series_long_term_forecast",
         experiment_name=f"{args.model}/{args.model_id}",
+        description=args.des,
         config={
-            **vars(args),
             "seed": fix_seed,
             "device": str(args.devices),
+            **vars(args),
         }
     )
 

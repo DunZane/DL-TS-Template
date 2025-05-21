@@ -11,19 +11,13 @@ def data_provider(args, flag):
     Data = data_dict[args.data]
     timeenc = 0 if args.embed != 'timeF' else 1
 
-    if flag == 'test':
-        shuffle_flag = False
+    if flag == 'train':
+        shuffle_flag = True
         drop_last = True
         batch_size = args.batch_size
         freq = args.freq
-    elif flag == 'infer':
-        shuffle_flag = False
-        drop_last = False
-        batch_size = 1
-        freq = args.freq
-        Data = Dataset_Kuai_Easy_QPS_Infer
     else:
-        shuffle_flag = True
+        shuffle_flag = False
         drop_last = True
         batch_size = args.batch_size
         freq = args.freq
